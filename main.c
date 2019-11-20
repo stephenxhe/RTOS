@@ -39,37 +39,33 @@ TCB_t TASKS[6];
 
 TCB_t *currentTask, *readyTask;
 
-uint32_t msTicks = 0;
+volatile uint32_t msTicks = 0;
 uint32_t stackPointer_current, stackPointer_next;
+
+void Delay(uint32_t dlyTicks)
+{
+	uint32_t curTicks;
+	curTicks = msTicks;
+	
+	while((msTicks - curTicks) < dlyTicks);
+	
+}
 
 bool osKernelInitialize (void){
 	
 	uint32_t *vectorTable = 0x0;
 	uint32_t mainStack = vectorTable[0];                     // = 0xFFFFF800 assuming main stack goes to 0xFFFFFFFF
-	printf("\n%d", vectorTable[0]);
 	// initialize each TCB with the base address for its stack
 	
 	for(int i = 5; i>-1; i--)
 	{
 		TASKS[i].stack_addr =  mainStack - (STACK_SIZE/8)*(6-i);
-		printf("\n%#x", TASKS[i].stack_addr);
 		TASKS[i].task_id = i;
 		TASKS[i].state = INACTIVE;
 		TASKS[i].priority = IDLE;
 	}
 	
 	return true;
-}
-
-void osKernelStart(void){
-	uint32_t *vectorTable = 0x0;
-	uint32_t mainStack = vectorTable[0];
-	__set_MSP(mainStack);
-	
-	//Switch from MSP to PSP
-	__set_CONTROL(__get_CONTROL() | 0x02);
-	__set_PSP(TASKS[0].stack_addr);
-	currentTask = &TASKS[0];
 }
 
 void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
@@ -105,7 +101,11 @@ void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 void t1(void *arg)
 {
 	// idle task
-	while(1);
+	while(1)
+	{
+		Delay(1);
+		printf("\nIDLE - %d", msTicks);
+	}
 }
 
 void t2(void *arg)
@@ -124,8 +124,53 @@ void t3(void *arg)
 	}
 }
 
+void osKernelStart(void){
+	uint32_t *vectorTable = 0x0;
+	uint32_t mainStack = vectorTable[0];
+	__set_MSP(mainStack);
+	
+	//Switch from MSP to PSP
+	__set_CONTROL(__get_CONTROL() | 0x02);
+	__set_PSP(TASKS[0].stack_addr);
+	
+	currentTask = &TASKS[0];
+	stackPointer_current = currentTask -> stack_addr;
+	
+	SysTick_Config(SystemCoreClock/10);
+	printf("\nStarting...\n\n");
+	
+	uint32_t period = 1000; // 1s
+	uint32_t prev = -period;
+	/*
+	while(true) {
+		if((uint32_t)(msTicks - prev) >= period) {
+			printf("tick ");
+			prev += period;
+		}
+	}
+	*/
+	t1(NULL);
+}
+
+int SWITCH = 1;
+
 void SysTick_Handler(void) {
-    msTicks++;
+	msTicks++;
+	
+	if (SWITCH == 1)
+	{
+		SWITCH = 2;
+	}
+	else
+	{
+		SWITCH = 1;
+	}
+	
+	readyTask = &TASKS[SWITCH];
+	stackPointer_next = readyTask -> stack_addr;
+	
+	SCB -> ICSR |= 1 << 28;
+	
 }
 // TODO
 // stackPointer_current will be updated to hold the address of the current task's Stack Pointer
@@ -144,30 +189,27 @@ __asm void PendSV_Handler(void) {
 }
 
 int main(void) {
-	/*
-	PendSV_Handler();
-  SysTick_Config(SystemCoreClock/1000);
-	*/
-	printf("\nStarting...\n\n");
+	// default code
+	printf("--- system init ---\n");
 	osKernelInitialize();
-	/*
-	uint32_t period = 1000; // 1s
-	uint32_t prev = -period;
-	while(true) {
-		if((uint32_t)(msTicks - prev) >= period) {
-			printf("tick ");
-			prev += period;
-		}
-	}
-	*/
 	osThreadStart(t1,NULL,IDLE);
 	osThreadStart(t2,NULL,NORMAL);
-	// osKernelStart();
-	
+	osThreadStart(t3,NULL,NORMAL);
+	osKernelStart();
+	/*
+	printf("\nStarting...\n\n");
+	osKernelInitialize();
+
+	osThreadStart(t1,NULL,IDLE);
+	osThreadStart(t2,NULL,NORMAL);
+	osKernelStart();
+	*/
+	/*
 	currentTask = &TASKS[0];
 	readyTask = &TASKS[1];
 	stackPointer_current = currentTask -> stack_addr;
 	stackPointer_current = readyTask -> stack_addr;
 	PendSV_Handler();
 	for(;;);
+	*/
 }
