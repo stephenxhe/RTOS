@@ -112,6 +112,7 @@ void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 	
 	*PSR = 0x01000000;
 	*PC = (uint32_t)(task);
+	*PC -= 1;
 	*R0 = (uint32_t)(arg);
 	
 	// populate R4-R11
@@ -139,8 +140,8 @@ void t1(void *arg)
 	// idle task
 	while(1)
 	{
-		Delay(100);
-		printf("\nIDEL");
+		Delay(1);
+		printf("\nidle %d",msTicks);
 	}
 }
 
@@ -148,6 +149,7 @@ void t2(void *arg)
 {
 	while(1)
 	{
+		Delay(10);
 		printf("\nTask 2");
 	}
 }
@@ -156,6 +158,7 @@ void t3(void *arg)
 {
 	while(1)
 	{
+		Delay(10);
 		printf("\nTask 3");
 	}
 }
@@ -172,7 +175,9 @@ void osKernelStart(void){
 	currentTask = &TASKS[0];
 	stackPointer_current = currentTask -> stack_addr;
 	
-	SysTick_Config(SystemCoreClock/10);
+	NVIC_SetPriority(SysTick_IRQn, 0xff);
+	NVIC_SetPriority(PendSV_IRQn, 0x00);
+
 	printf("\nStarting...\n\n");
 	
 	/*
@@ -186,37 +191,40 @@ void osKernelStart(void){
 		}
 	}
 	*/
-	
+	SysTick_Config(SystemCoreClock/10);
 	t1(NULL);
 }
 
-int SWITCH = 1;
+int SWITCH = 0;
 
 void SysTick_Handler(void) {
 	msTicks++;
-	printf("\ntime to fuck it up");
-	
-	if (SWITCH == 1)
+	if (msTicks % 10 == 0)
 	{
-		SWITCH = 2;
-	}
-	else
-	{
-		SWITCH = 1;
+		printf("\n	tick %d",msTicks);
+		
+		if (SWITCH == 1)
+		{
+			SWITCH = 0;
+			// printf(" - switch to task 1");
+		}
+		else
+		{
+			SWITCH = 1;
+			// printf(" - switch to task 2");
+		}
+		readyTask = &TASKS[SWITCH];
+		stackPointer_next = readyTask -> stack_addr;
+		
+		SCB -> ICSR |= 1 << 28;
 	}
 	
+	/*
 	readyTask = &TASKS[SWITCH];
 	stackPointer_next = readyTask -> stack_addr;
 	
 	SCB -> ICSR |= 1 << 28;
-	
-	while(SCB -> ICSR >> 28);
-	
-	currentTask = readyTask;
-	stackPointer_current = stackPointer_next;
-	
-	printf("\nfucked it up");
-	
+	*/
 
 }
 // TODO
@@ -224,6 +232,12 @@ void SysTick_Handler(void) {
 // stackPointer_next will be updated to hold the address of the next ready task's Stack Pointer
 
 __asm void PendSV_Handler(void) {
+	MRS R1,MSP
+	
+	MRS R0,PSP
+	MOV R13,R0
+	
+	/*
 	MRS R1,MSP
 	
 	MRS R0,PSP
@@ -242,7 +256,9 @@ __asm void PendSV_Handler(void) {
 	LDR R0,=__cpp(&stackPointer_next)
 	STR R13,[R0]
 	
-	MSR MSP,R1
+	MOV R13,R1
+	*/
+	MOV R13,R1
 	BX		LR
 }
 
