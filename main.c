@@ -88,11 +88,18 @@ void queue_init(queue_t *q)
 void enqueue(queue_t *q, TCB_t *t)
 {
 	TCB_t *curr = q -> head;
-	while(curr -> next != NULL)
+	if (q -> size == 0)
 	{
-		curr = curr -> next;
+		q -> head = t;
 	}
-	curr -> next = t;
+	else
+	{
+		while(curr -> next != NULL)
+		{
+			curr = curr -> next;
+		}
+		curr -> next = t;
+	}
 	q -> size++;
 	t->next = NULL;				// after enqueuing, the added TCB's next pointer should be NULL
 	bitVector |= 1 << t->priority;
@@ -100,8 +107,12 @@ void enqueue(queue_t *q, TCB_t *t)
 void dequeue(queue_t *q)
 {
 	TCB_t *curr = q -> head;
-	q->head = curr->next;
-	q->size --;
+	if (q -> size > 0)
+	{
+		q->head = curr->next;
+		q->size --;
+	}
+	
 	if(q->size == 0)
 	{
 		bitVector &= ~(1 << curr->priority);
