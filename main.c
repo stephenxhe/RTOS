@@ -166,35 +166,7 @@ bool osKernelInitialize (void){
 
 void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 {
-	/*
-	TCB_t *current_task = &TASKS[num_tasks++];
-	
-	current_task -> priority = priority;
-	
-	uint32_t *PSR = (uint32_t *)(current_task -> stack_addr + 15*sizeof(uint32_t));
-	uint32_t *R0 = (uint32_t *)(current_task -> stack_addr + 8*sizeof(uint32_t));
-	uint32_t *PC = (uint32_t *)(current_task -> stack_addr + 14*sizeof(uint32_t));
-	
-	*PSR = 0x01000000;
-	*PC = (uint32_t)(task);
-	*R0 = (uint32_t)(arg);
-	
-	// populate R4-R11
-	for (int i = 0; i<8; i++)
-	{
-		uint32_t *curr = (uint32_t *)(current_task ->stack_addr + i*sizeof(uint32_t));
-		
-		*curr = 0x00000000 + (i+1);
-	}
-	
-	for (int i = 9; i<14; i++)
-	{
-		uint32_t *curr = (uint32_t *)(current_task -> stack_addr + i*sizeof(uint32_t));
-		
-		*curr = 0xFFFF0000 + i;
-	}
-	*/
-	
+	printf("\ninit task %d",num_tasks);
 	TCB_t *current_task = &TASKS[num_tasks];
 	
 	current_task -> priority = priority;
@@ -205,9 +177,7 @@ void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 	
 	*PSR = 0x01000000;
 	
-	// problem
 	*PC = (uint32_t)(task);
-	*PC -= 1;
 	
 	*R0 = (uint32_t)(arg);
 	
@@ -217,8 +187,7 @@ void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 		// i = 0,1,2,3,4,5,6,7
 		uint32_t *curr = (uint32_t *)(current_task ->stack_addr - (15-i)*sizeof(uint32_t));
 		
-		*curr = 0x00000000 + num_tasks;
-		*curr = *PC;
+		*curr = 0xAB000000 + num_tasks;
 	}
 	
 	for (int i = 9; i<14; i++)
@@ -226,10 +195,9 @@ void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 		uint32_t *curr = (uint32_t *)(current_task -> stack_addr - (15-i)*sizeof(uint32_t));
 		
 		*curr = 0xFFFF0000 + num_tasks;
-		*curr = *PC;
 	}
 	
-	current_task -> stack_addr -= 16*4;
+	current_task -> stack_addr -= 15*4;
 	
 	enqueue(&priorityArray[priority],current_task);
 	
@@ -238,15 +206,15 @@ void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 
 void t1(void *arg)
 {
-	// idle task
 	while(1)
 	{
-		uint32_t curTicks;
-		curTicks = msTicks;
-		int dlyTicks = 1;
+		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
+		TASKS[0].stack_addr = __get_PSP();
+		currentTask = &TASKS[0];
+		stackPointer_current = currentTask -> stack_addr;
 		
-		while((msTicks - curTicks) < dlyTicks);
-		printf("\nidle %d",msTicks);
+		printf("\nTask1 %d",msTicks);
+		Delay(1);
 	}
 }
 
@@ -254,12 +222,13 @@ void t2(void *arg)
 {
 	while(1)
 	{
-		uint32_t curTicks;
-		curTicks = msTicks;
-		int dlyTicks = 1;
+		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
+		TASKS[1].stack_addr = __get_PSP();
+		currentTask = &TASKS[1];
+		stackPointer_current = currentTask -> stack_addr;
 		
-		while((msTicks - curTicks) < dlyTicks);
-		printf("\nTask 2");
+		printf("\nTask2 %d",msTicks);
+		Delay(1);
 	}
 }
 
@@ -267,12 +236,13 @@ void t3(void *arg)
 {
 	while(1)
 	{
-		uint32_t curTicks;
-		curTicks = msTicks;
-		int dlyTicks = 1;
+		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
+		TASKS[2].stack_addr = __get_PSP();
+		currentTask = &TASKS[2];
+		stackPointer_current = currentTask -> stack_addr;
 		
-		while((msTicks - curTicks) < dlyTicks);
-		printf("\nTask 3");
+		printf("\nTask3 %d",msTicks);
+		Delay(1);
 	}
 }
 
@@ -285,25 +255,11 @@ void osKernelStart(void){
 	__set_CONTROL(__get_CONTROL() | 0x02);
 	__set_PSP(TASKS[0].stack_addr);
 	
-	currentTask = &TASKS[0];
-	stackPointer_current = currentTask -> stack_addr;
-	
-	NVIC_SetPriority(SysTick_IRQn, 0xff);
-	NVIC_SetPriority(PendSV_IRQn, 0x00);
+	NVIC_SetPriority(SysTick_IRQn, 0x00);
+	NVIC_SetPriority(PendSV_IRQn, 0xff);
 
-	printf("\nStarting...\n\n");
+	printf("\n\nStarting...\n\n");
 	
-	/*
-	uint32_t period = 1000; // 1s
-	uint32_t prev = -period;
-	
-	while(true) {
-		if((uint32_t)(msTicks - prev) >= period) {
-			printf("tick ");
-			prev += period;
-		}
-	}
-	*/
 	SysTick_Config(SystemCoreClock/10);
 	t1(NULL);
 }
@@ -314,43 +270,37 @@ void SysTick_Handler(void) {
 	msTicks++;
 	if (msTicks % 2 == 0)
 	{
-		printf("\n	tick %d",msTicks);
+		printf("\n	switch from task %d",SWITCH+1);
 		
-		if (SWITCH == 1)
+		if (SWITCH == 0)
 		{
-			SWITCH = 0;
-			// printf(" - switch to task 1");
+			SWITCH = 1;
 		}
 		else
 		{
-			SWITCH = 1;
-			// printf(" - switch to task 2");
+			SWITCH = 0;
 		}
+		
 		readyTask = &TASKS[SWITCH];
 		stackPointer_next = readyTask -> stack_addr;
 		
 		SCB -> ICSR |= 1 << 28;
+		printf(" to task %d", SWITCH+1);
 	}
 }
-// TODO
-// stackPointer_current will be updated to hold the address of the current task's Stack Pointer
-// stackPointer_next will be updated to hold the address of the next ready task's Stack Pointer
 
 __asm void PendSV_Handler(void) {
 	MRS R1,MSP
-	
 	MRS R0,PSP
-	MOV R13,R0
 	
-	PUSH {R4-R11}
+	STMFD R0!,{R4-R11}
 	LDR R4,=__cpp(&stackPointer_current)
-	STR R13,[R4]
+	STR R0,[R4]
 	
 	LDR R4,=__cpp(&stackPointer_next)
-	LDR R13,[R4]
-	POP {r4-r11}
+	LDR R0,[R4]
+	LDMFD R0!,{R4-R11}
 	
-	// MOV R0,R13                     // load PSP with new stack address PROBLEM
 	MSR PSP,R0
 	MSR MSP,R1
 	
@@ -359,13 +309,13 @@ __asm void PendSV_Handler(void) {
 
 int main(void) {
 	// default code
-	printf("--- system init ---\n");
+	printf("\n\n\n--- system init ---\n");
 	
 	osKernelInitialize();
 	init_priorityArray();
 	osThreadStart(t1,NULL,IDLE);
 	osThreadStart(t2,NULL,NORMAL);
-	osThreadStart(t2,NULL,NORMAL);
+	osThreadStart(t3,NULL,NORMAL);
 	osKernelStart();
 
 }
