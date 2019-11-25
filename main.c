@@ -213,7 +213,7 @@ void t1(void *arg)
 		currentTask = &TASKS[0];
 		stackPointer_current = currentTask -> stack_addr;
 		
-		printf("\nTask1 %d",msTicks);
+		printf("\nTask0");
 		Delay(1);
 	}
 }
@@ -227,7 +227,7 @@ void t2(void *arg)
 		currentTask = &TASKS[1];
 		stackPointer_current = currentTask -> stack_addr;
 		
-		printf("\nTask2 %d",msTicks);
+		printf("\nTask1");
 		Delay(1);
 	}
 }
@@ -241,7 +241,7 @@ void t3(void *arg)
 		currentTask = &TASKS[2];
 		stackPointer_current = currentTask -> stack_addr;
 		
-		printf("\nTask3 %d",msTicks);
+		printf("\nTask2");
 		Delay(1);
 	}
 }
@@ -268,7 +268,7 @@ int SWITCH = 0;
 
 void SysTick_Handler(void) {
 	msTicks++;
-	if (msTicks % 2 == 0)
+	if (msTicks % 10 == 0)
 	{
 		printf("\n	switch from task %d",SWITCH+1);
 		
@@ -276,7 +276,11 @@ void SysTick_Handler(void) {
 		{
 			SWITCH = 1;
 		}
-		else
+		else if (SWITCH == 1)
+		{
+			SWITCH = 2;
+		}
+		else if (SWITCH == 2)
 		{
 			SWITCH = 0;
 		}
