@@ -3,17 +3,37 @@
 #include <stdint.h>
 #include <stdio.h>
 
-typedef struct OS_TCB {
-	uint8_t task_id;
-	uint8_t state;
-	uint32_t *tsk_stack;
-	uint8_t priority;
-	uint16_t events;
-} *P_TCB;
+typedef uint32_t sem_t;
+typedef sem_t mutex_t;
+typedef void (*rtosTaskFunc_t)(void *args);
+typedef uint8_t bitVector_t;
 
+typedef enum{
+	READY,
+	RUNNING,
+	BLOCKED,
+	INACTIVE,
+	TERMINATED
+} state_t;
 
-struct OS_TASK {
+typedef enum{
+	IDLE = 0x00,
+	LOW = 0x1,
+	NORMAL = 0x2,
+	ABOVE_NORMAL = 0x3,
+	HIGH = 0x4
+}priority_t;
+
+typedef struct TCB{
 	uint8_t task_id;
-	uint8_t status;
-	
-} task;
+	state_t state;
+	uint32_t stack_addr;
+	priority_t priority;
+	struct TCB *next;
+} TCB_t;
+
+typedef struct queue{
+	TCB_t *head;
+	uint32_t size;
+}queue_t;
+
