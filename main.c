@@ -11,22 +11,18 @@
 #define STACK_SIZE	1024
 #define NUM_PRIORITIES 5
 
-#define FPP
+#define __FPP
+volatile uint32_t msTicks = 0;
 
 int num_tasks = 0;
 TCB_t TASKS[6];
 int SWITCH = 0;
 TCB_t *currentTask, *readyTask;
-volatile uint32_t msTicks = 0;
 uint32_t stackPointer_current, stackPointer_next;
 bitVector_t bitVector = 0;
 queue_t priorityArray[NUM_PRIORITIES];
 
-int fpp_count1 = 0;		// t2 work
-int fpp_count2 = 0;		// t3 work
-int fpp_count3 = 0;		// t4 work
-int fpp_count4 = 0;		// t5 work
-int fpp_count5 = 0;		// t6 work
+int fpp_count[] = {0,3,3,2,2,3};
 
 void Delay(uint32_t dlyTicks)
 {
@@ -94,21 +90,24 @@ void enqueue(queue_t *q, TCB_t *t)
 	}
 	q -> size++;
 	t->next = NULL;				// after enqueuing, the added TCB's next pointer should be NULL
+	t->state = READY;
 	bitVector |= 1 << t->priority;
 }
-void dequeue(queue_t *q)
+TCB_t* dequeue(queue_t *q)
 {
 	TCB_t *curr = q -> head;
+	TCB_t *ret = curr;
+	
 	if (q -> size > 0)
 	{
 		q->head = curr->next;
 		q->size --;
 	}
-	
 	if(q->size == 0)
 	{
 		bitVector &= ~(1 << curr->priority);
 	}
+	return ret;
 }
 
 
@@ -140,7 +139,7 @@ bool osKernelInitialize(void)
 
 void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 {
-	printf("\ninit t%d",num_tasks);
+	printf("\ninit t%d p%d",num_tasks,priority);
 	TCB_t *current_task = &TASKS[num_tasks];
 	
 	current_task -> priority = priority;
@@ -176,27 +175,45 @@ void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 	num_tasks++;
 }
 
+void t0(void *arg)
+{
+	while(1)
+	{
+		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
+		TASKS[0].stack_addr = __get_PSP();
+		TASKS[0].state = RUNNING;
+		currentTask = &TASKS[0];
+		stackPointer_current = currentTask -> stack_addr;
+		
+		printf("\nIDLE");
+		
+		Delay(1);
+	}
+}
+
 
 void t1(void *arg)
 {
 	while(1)
-	{
-		
-		#ifdef FPP
-		
-		#endif
-		
-		#ifdef CONTEXT
+	{	
 		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-		TASKS[0].stack_addr = __get_PSP();
-		currentTask = &TASKS[0];
+		TASKS[1].stack_addr = __get_PSP();
+		TASKS[1].state = RUNNING;
+		currentTask = &TASKS[1];
 		stackPointer_current = currentTask -> stack_addr;
 		
-		printf("\nTask0 %d", msTicks);
-		
-		Delay(1);
+		#ifdef __FPP
+		fpp_count[1]--;
+		if (fpp_count[1] == 0)
+		{
+			TASKS[1].state = TERMINATED;
+			while (1);
+		}
 		#endif
 		
+		printf("\nt1 %d", fpp_count[1]);
+		
+		Delay(1);
 	}
 }
 
@@ -205,18 +222,24 @@ void t2(void *arg)
 {
 	while(1)
 	{
-		
-		#ifdef CONTEXT
 		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-		TASKS[1].stack_addr = __get_PSP();
-		currentTask = &TASKS[1];
+		TASKS[2].stack_addr = __get_PSP();
+		TASKS[2].state = RUNNING;
+		currentTask = &TASKS[2];
 		stackPointer_current = currentTask -> stack_addr;
 		
-		printf("\nTask1 %d", msTicks);
-		
-		Delay(1);
+		#ifdef __FPP
+		fpp_count[2]--;
+		if (fpp_count[2] == 0)
+		{
+			TASKS[2].state = TERMINATED;
+			while (1);
+		}
 		#endif
 		
+		printf("\nt2 %d", fpp_count[2]);
+		
+		Delay(1);
 	}
 }
 
@@ -225,38 +248,49 @@ void t3(void *arg)
 {
 	while(1)
 	{
-		
-		#ifdef CONTEXT
 		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-		TASKS[2].stack_addr = __get_PSP();
-		currentTask = &TASKS[2];
+		TASKS[3].stack_addr = __get_PSP();
+		TASKS[3].state = RUNNING;
+		currentTask = &TASKS[3];
 		stackPointer_current = currentTask -> stack_addr;
 		
-		printf("\nTask2 %d", msTicks);
-		
-		Delay(1);
+		#ifdef __FPP
+		fpp_count[3]--;
+		if (fpp_count[3] == 0)
+		{
+			TASKS[3].state = TERMINATED;
+			while (1);
+		}
 		#endif
 		
+		printf("\nt3 %d", fpp_count[3]);
+		
+		Delay(1);
 	}
 }
-
 
 void t4(void *arg)
 {
 	while(1)
 	{
-		
-		#ifdef CONTEXT
 		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-		TASKS[3].stack_addr = __get_PSP();
-		currentTask = &TASKS[3];
+		TASKS[4].stack_addr = __get_PSP();
+		TASKS[4].state = RUNNING;
+		currentTask = &TASKS[4];
 		stackPointer_current = currentTask -> stack_addr;
 		
-		printf("\nTask3 %d", msTicks);
-		
-		Delay(1);
+		#ifdef __FPP
+		fpp_count[4]--;
+		if (fpp_count[4] == 0)
+		{
+			TASKS[4].state = TERMINATED;
+			while (1);
+		}
 		#endif
 		
+		printf("\nt4 %d", fpp_count[4]);
+		
+		Delay(1);
 	}
 }
 
@@ -264,37 +298,24 @@ void t5(void *arg)
 {
 	while(1)
 	{
-		
-		#ifdef CONTEXT
 		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-		TASKS[3].stack_addr = __get_PSP();
-		currentTask = &TASKS[3];
+		TASKS[5].stack_addr = __get_PSP();
+		TASKS[5].state = RUNNING;
+		currentTask = &TASKS[5];
 		stackPointer_current = currentTask -> stack_addr;
 		
-		printf("\nTask4 %d", msTicks);
-		
-		Delay(1);
+		#ifdef __FPP
+		fpp_count[5]--;
+		if (fpp_count[5] == 0)
+		{
+			TASKS[5].state = TERMINATED;
+			while (1);
+		}
 		#endif
 		
-	}
-}
-
-void t6(void *arg)
-{
-	while(1)
-	{
-		
-		#ifdef CONTEXT
-		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-		TASKS[3].stack_addr = __get_PSP();
-		currentTask = &TASKS[3];
-		stackPointer_current = currentTask -> stack_addr;
-		
-		printf("\nTask5 %d", msTicks);
+		printf("\nt5 %d", fpp_count[5]);
 		
 		Delay(1);
-		#endif
-		
 	}
 }
 
@@ -305,15 +326,16 @@ void init_priorityArray()
 	{
 		queue_init(&priorityArray[i]);
 	}
-	osThreadStart(t1,NULL,IDLE);
+	osThreadStart(t0,NULL,IDLE);
+	osThreadStart(t1,NULL,LOW);
 	osThreadStart(t2,NULL,LOW);
-	osThreadStart(t3,NULL,LOW);
-	osThreadStart(t4,NULL,NORMAL);
+	osThreadStart(t3,NULL,NORMAL);
+	osThreadStart(t4,NULL,HIGH);
 	osThreadStart(t5,NULL,HIGH);
-	osThreadStart(t6,NULL,HIGH);
 	
 	for(int i = 0; i<6; i++)
 	{
+		if (TASKS[i].priority != IDLE)
 		enqueue(&priorityArray[TASKS[i].priority],&TASKS[i]);
 	}
 }
@@ -334,21 +356,36 @@ void osKernelStart(void)
 	printf("\n\nStarting...\n\n");
 	
 	SysTick_Config(SystemCoreClock/10);
-	t1(NULL);
+	t0(NULL);
 }
 
 
 void SysTick_Handler(void) {
 	msTicks++;
 	
-	#ifdef FPP
-	int leadingZ = __clz(bitVector);
+
+	#ifdef __FPP
+	uint8_t leadingZ = __clz(bitVector);
+	uint8_t nextQueue_idx = 31 - leadingZ;
+	
+
+	if (currentTask -> state != TERMINATED)
+	{
+		enqueue(&priorityArray[currentTask -> priority],&TASKS[currentTask -> task_id]);
+	}
+	
+	readyTask = dequeue(&priorityArray[nextQueue_idx]);
+	stackPointer_next = readyTask -> stack_addr;
+	
+	SCB -> ICSR |= 1 << 28;
+	
+	// printf("   -  switch from task %d to %d", currentTask -> task_id, readyTask -> task_id);
 	
 	#endif
 	
-	#ifdef CONTEXT
+	#ifdef __CONTEXT
 	// context switching
-	if (msTicks % 5 == 0)
+	if (msTicks % 3 == 0)
 	{
 		printf("\n	switch from task %d",SWITCH+1);
 		
@@ -397,17 +434,17 @@ int main(void) {
 	// default code
 	printf("\n\n\n--- system init ---\n");
 	
-	#ifdef CONTEXT
+	#ifdef __CONTEXT
 	// context switching
 	osKernelInitialize();
-	osThreadStart(t1,NULL,IDLE);
+	osThreadStart(t0,NULL,IDLE);
+	osThreadStart(t1,NULL,NORMAL);
 	osThreadStart(t2,NULL,NORMAL);
 	osThreadStart(t3,NULL,NORMAL);
-	osThreadStart(t4,NULL,NORMAL);
 	#endif
 	
 	
-	#ifdef FPP
+	#ifdef __FPP
 	// FPP scheduling
 	osKernelInitialize();
 	init_priorityArray();
