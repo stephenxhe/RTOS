@@ -3,17 +3,15 @@
 #include <stdint.h>
 #include <stdio.h>
 
-typedef uint32_t sem_t;
-typedef sem_t mutex_t;
 typedef void (*rtosTaskFunc_t)(void *args);
 typedef uint8_t bitVector_t;
 
 typedef enum{
-	READY,
-	RUNNING,
-	BLOCKED,
-	INACTIVE,
-	TERMINATED
+	READY = 0,
+	RUNNING = 1,
+	BLOCKED = 2,
+	INACTIVE = 3,
+	TERMINATED = 4
 } state_t;
 
 typedef enum{
@@ -29,6 +27,7 @@ typedef struct TCB{
 	state_t state;
 	uint32_t stack_addr;
 	priority_t priority;
+	priority_t oldPriority;
 	struct TCB *next;
 } TCB_t;
 
@@ -37,3 +36,11 @@ typedef struct queue{
 	uint32_t size;
 }queue_t;
 
+typedef struct sem {
+	int32_t s;
+	queue_t wait;
+} sem_t;
+typedef struct mutex{
+	sem_t m;
+	uint8_t owner;
+}mutex_t;

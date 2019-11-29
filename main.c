@@ -11,7 +11,8 @@
 #define STACK_SIZE	1024
 #define NUM_PRIORITIES 5
 
-#define __CONTEXT
+#define __PRIO
+
 volatile uint32_t msTicks = 0;
 
 int num_tasks = 0;
@@ -23,6 +24,9 @@ bitVector_t bitVector = 0;
 queue_t priorityArray[NUM_PRIORITIES];
 
 int fpp_count[] = {0,5,2,5,2,5};
+int sem_count = 10;
+
+int contextFlag = 0;
 
 void Delay(uint32_t dlyTicks)
 {
@@ -32,40 +36,15 @@ void Delay(uint32_t dlyTicks)
 	while((msTicks - curTicks) < dlyTicks);
 }
 
-
-void init_sem(sem_t *s, uint32_t count)
+void prioInherit()
 {
-	*s = count;
-}
-void wait_sem(sem_t *s)
-{
-	__disable_irq();
-	while(*s==0)
-	{
-		__enable_irq();
-		__disable_irq();
-	}
-	(*s)--;
-	__enable_irq();
-}
-void signal_sem(sem_t *s)
-{
-	__disable_irq();
-	(*s)++;
-	__enable_irq();
+	currentTask -> oldPriority = currentTask -> priority;
+	currentTask -> priority = HIGH;
 }
 
-void mutex_init(mutex_t *m)
+void prioRestore()
 {
-	init_sem(m,1);
-}
-void acquire(mutex_t *m)
-{
-	wait_sem(m);
-}
-void release(mutex_t *m)
-{
-	signal_sem(m);
+	currentTask -> priority = currentTask -> oldPriority;
 }
 
 void queue_init(queue_t *q)
@@ -73,6 +52,7 @@ void queue_init(queue_t *q)
 	q -> head = NULL;
 	q -> size = 0;
 }
+
 void enqueue(queue_t *q, TCB_t *t)
 {
 	TCB_t *curr = q -> head;
@@ -110,6 +90,105 @@ TCB_t* dequeue(queue_t *q)
 	return ret;
 }
 
+void init_sem(sem_t *sem, uint32_t count)
+{
+	sem -> s = count;
+	queue_init(&(sem -> wait));
+	
+}
+void wait_sem(sem_t *sem)
+{
+	__disable_irq();
+	(sem -> s)--;
+	printf("\nt%d req", currentTask -> task_id);
+	if (sem -> s < 0)
+	{
+		currentTask -> state = BLOCKED;
+		enqueue(&sem -> wait,currentTask);
+		printf("\nt%d wait", currentTask -> task_id);
+		contextFlag = 1;
+	}
+	__enable_irq();
+	
+	while(contextFlag);
+}
+void signal_sem(sem_t *sem)
+{
+	__disable_irq();
+	(sem -> s)++;
+	if (sem -> s >= 0)
+	{
+		printf("\nt%d rel",currentTask -> task_id);
+		TCB_t *next = dequeue(&sem -> wait);
+		next -> state = READY;
+		enqueue(&priorityArray[next -> priority],&TASKS[next->task_id]);
+		contextFlag = 0;
+	}
+	__enable_irq();
+}
+
+void init_mtx(mutex_t *mtx)
+{
+	init_sem(&mtx -> m,1);
+}
+void acquire(mutex_t *mtx)
+{
+	__disable_irq();
+	if (mtx -> m.s == 0)
+	{
+		// mtx has another owner
+		currentTask -> state = BLOCKED;
+		TCB_t *blockedTask = dequeue(&priorityArray[currentTask -> priority]);
+		enqueue(&mtx -> m.wait,blockedTask);
+		printf("\nt%d block", currentTask -> task_id);
+		contextFlag = 1;
+	} else if (mtx -> m.s == 1)
+	{
+		// can acquire
+		mtx -> m.s = 0;
+		mtx -> owner = currentTask -> task_id;
+		printf("\nt%d acq", currentTask -> task_id);
+		
+		#ifdef __PRIO
+		prioInherit();
+		#endif
+	}
+	__enable_irq();
+	while(contextFlag);
+}
+void release(mutex_t *mtx)
+{
+	__disable_irq();
+	if (mtx -> m.s == 0 && mtx -> owner == currentTask -> task_id)
+	{
+		// is owner, can release
+		printf("\nt%d rel", currentTask -> task_id);
+		mtx -> m.s = 1;
+		mtx -> owner = 0;
+		contextFlag = 0;
+		if (mtx -> m.wait.size > 0)
+		{
+			TCB_t *next = dequeue(&mtx -> m.wait);
+			next -> state = READY;
+			enqueue(&priorityArray[next -> priority],&TASKS[next->task_id]);
+		}
+		#ifdef __PRIO
+		prioRestore();
+		#endif
+	}
+	else if (mtx -> m.s == 1)
+	{
+		// mtx not owned
+		printf("\nt%d no owner", currentTask -> task_id);
+	}
+	else if (mtx -> m.s == 0 && mtx -> owner != currentTask -> task_id)
+	{
+		// not owner
+		printf("\nt%d not owner", currentTask -> task_id);
+	}
+	__enable_irq();
+}
+
 
 bool osKernelInitialize(void)
 {
@@ -128,10 +207,9 @@ bool osKernelInitialize(void)
 		TASKS[task_id].priority = IDLE;
 	}
 	
-	printf("\nmain stack starting at 0x%x",mainStack);
-	for (int i = 0; i<6; i++)
+	for(int i = 0; i<NUM_PRIORITIES; i++)
 	{
-		printf("\ntask %d stack starting at 0x%x",i, TASKS[i].stack_addr);
+		queue_init(&priorityArray[i]);
 	}
 	
 	return true;
@@ -143,6 +221,7 @@ void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 	TCB_t *current_task = &TASKS[num_tasks];
 	
 	current_task -> priority = priority;
+	current_task -> oldPriority = priority;
 	
 	uint32_t *PSR = (uint32_t *)(current_task -> stack_addr);
 	uint32_t *R0 = (uint32_t *)(current_task -> stack_addr - 7*sizeof(uint32_t));
@@ -172,20 +251,22 @@ void osThreadStart(rtosTaskFunc_t task, void *arg, priority_t priority)
 	
 	current_task -> stack_addr -= 15*4;
 	
+	if (num_tasks > 0)
+		enqueue(&priorityArray[TASKS[num_tasks].priority],&TASKS[num_tasks]);
+	
 	num_tasks++;
 }
+
+sem_t sem;
+mutex_t mtx;
 
 void t0(void *arg)
 {
 	while(1)
-	{
-		TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-		TASKS[0].stack_addr = __get_PSP();
-		TASKS[0].state = RUNNING;
-		currentTask = &TASKS[0];
-		stackPointer_current = currentTask -> stack_addr;
-		
+	{	
+		__disable_irq();
 		printf("\nIDLE");
+		__enable_irq();
 		
 		Delay(1);
 	}
@@ -205,19 +286,52 @@ void t1(void *arg)
 	{
 		if (TASKS[1].state != TERMINATED)
 		{
-			TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-			TASKS[1].stack_addr = __get_PSP();
-			TASKS[1].state = RUNNING;
-			currentTask = &TASKS[1];
-			stackPointer_current = currentTask -> stack_addr;
 			
-			printf("\nt1 %d", fpp_count[1]);
+			#ifdef __PRIO
+			acquire(&mtx);
+			for(int i = 0; i < 15; i++)
+			{
+				__disable_irq();
+				printf("\nt1");
+				__enable_irq();
+				Delay(1);
+			}
+			release(&mtx);
+			TASKS[1].state = TERMINATED;
+			#endif
+			
+			#ifdef __MTX
+			acquire(&mtx);
+			__disable_irq();
+			printf("\nt1 has mtx");
+			__enable_irq();
+			release(&mtx);
+			#endif
+			
+			#ifdef __SEM
+			wait_sem(&sem);
+			__disable_irq();
+			printf("\nt1 has sem");
+			__enable_irq();
+			Delay(5);
+			signal_sem(&sem);
+			#endif
+			
 			#ifdef __FPP
+			__disable_irq();
+			printf("\nt1 %d", fpp_count[1]);
+			__enable_irq();
 			fpp_count[1]--;
 			if (fpp_count[1] == 0)
 			{
 				TASKS[1].state = TERMINATED;
 			}
+			#endif
+			
+			#ifdef __CONTEXT
+			__disable_irq();
+			printf("\nt1");
+			__enable_irq();
 			#endif
 			
 			Delay(1);
@@ -232,14 +346,32 @@ void t2(void *arg)
 	{
 		if (TASKS[2].state != TERMINATED)
 		{
-			TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-			TASKS[2].stack_addr = __get_PSP();
-			TASKS[2].state = RUNNING;
-			currentTask = &TASKS[2];
-			stackPointer_current = currentTask -> stack_addr;
 			
-			printf("\nt2 %d", fpp_count[2]);
+			#ifdef __PRIO
+			__disable_irq();
+			printf("\nt2");
+			__enable_irq();
+			Delay(1);
+			#endif
+			
+			#ifdef __MTX
+			Delay(10);
+			release(&mtx);
+			#endif
+			
+			#ifdef __SEM
+			wait_sem(&sem);
+			__disable_irq();
+			printf("\nt2 has sem");
+			__enable_irq();
+			Delay(5);
+			signal_sem(&sem);
+			#endif
+			
 			#ifdef __FPP
+			__disable_irq();
+			printf("\nt2 %d", fpp_count[2]);
+			__enable_irq();
 			fpp_count[2]--;
 			if (fpp_count[2] == 0)
 			{
@@ -247,11 +379,16 @@ void t2(void *arg)
 			}
 			#endif
 			
+			#ifdef __CONTEXT
+			__disable_irq();
+			printf("\nt2");
+			__enable_irq();
+			#endif
+			
 			Delay(1);
 		}
 	}
 }
-
 
 void t3(void *arg)
 {
@@ -259,14 +396,24 @@ void t3(void *arg)
 	{
 		if (TASKS[3].state != TERMINATED)
 		{
-			TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-			TASKS[3].stack_addr = __get_PSP();
-			TASKS[3].state = RUNNING;
-			currentTask = &TASKS[3];
-			stackPointer_current = currentTask -> stack_addr;
 			
-			printf("\nt3 %d", fpp_count[3]);
+			#ifdef __PRIO
+			acquire(&mtx);
+			for (int i = 0 ; i < 5; i++)
+			{
+				__disable_irq();
+				printf("\nt3 %d", i);
+				__enable_irq();
+				Delay(1);
+			}
+			release(&mtx);
+			#endif
+			
 			#ifdef __FPP
+			__disable_irq();
+			printf("\nt3 %d", fpp_count[3]);
+			__enable_irq();
+			
 			fpp_count[3]--;
 			if (fpp_count[3] == 0)
 			{
@@ -285,14 +432,11 @@ void t4(void *arg)
 	{
 		if (TASKS[4].state != TERMINATED)
 		{
-			TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-			TASKS[4].stack_addr = __get_PSP();
-			TASKS[4].state = RUNNING;
-			currentTask = &TASKS[4];
-			stackPointer_current = currentTask -> stack_addr;
 			
-			printf("\nt4 %d", fpp_count[4]);
 			#ifdef __FPP
+			__disable_irq();
+			printf("\nt4 %d", fpp_count[4]);
+			__enable_irq();
 			fpp_count[4]--;
 			if (fpp_count[4] == 0)
 			{
@@ -311,14 +455,11 @@ void t5(void *arg)
 	{
 		if (TASKS[5].state != TERMINATED)
 		{
-			TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
-			TASKS[5].stack_addr = __get_PSP();
-			TASKS[5].state = RUNNING;
-			currentTask = &TASKS[5];
-			stackPointer_current = currentTask -> stack_addr;
 			
-			printf("\nt5 %d", fpp_count[5]);
 			#ifdef __FPP
+			__disable_irq();
+			printf("\nt5 %d", fpp_count[5]);
+			__enable_irq();
 			fpp_count[5]--;
 			if (fpp_count[5] == 0)
 			{
@@ -328,27 +469,6 @@ void t5(void *arg)
 			
 			Delay(1);
 		}
-	}
-}
-
-void init_priorityArray()
-{
-	printf("\n\n--- init priority array ---\n");
-	for(int i = 0; i<NUM_PRIORITIES; i++)
-	{
-		queue_init(&priorityArray[i]);
-	}
-	osThreadStart(t0,NULL,IDLE);
-	osThreadStart(t1,NULL,HIGH);
-	osThreadStart(t2,NULL,HIGH);
-	osThreadStart(t3,NULL,NORMAL);
-	osThreadStart(t4,NULL,LOW);
-	osThreadStart(t5,NULL,LOW);
-	
-	for(int i = 0; i<6; i++)
-	{
-		if (TASKS[i].priority != IDLE)
-		enqueue(&priorityArray[TASKS[i].priority],&TASKS[i]);
 	}
 }
 
@@ -370,20 +490,32 @@ void osKernelStart(void)
 	
 	printf("\n\nStarting...\n\n");
 	
-	SysTick_Config(SystemCoreClock/10);
+	SysTick_Config(SystemCoreClock/100);
 	t0(NULL);
 }
 
+int t2Started = 0;
+int t3Started = 0;
 
 void SysTick_Handler(void) {
 	msTicks++;
 	
-	#ifdef __FPP				// each systick is a timeslice
+	#ifdef __PRIO
+	if (msTicks > 3 && !t2Started)
+	{
+		osThreadStart(t2,NULL,HIGH);
+		t2Started = 1;
+	}
+	if (msTicks > 10 && !t3Started)
+	{
+		osThreadStart(t3,NULL,NORMAL);
+		t3Started = 1;
+	}
+	#endif
 	
-	// store current running task at back of its priority queue
-	if (currentTask -> state != TERMINATED)
+	#ifndef __CONTEXT
+	if (currentTask -> state != TERMINATED && currentTask -> state != BLOCKED)
 		enqueue(&priorityArray[currentTask -> priority],&TASKS[currentTask -> task_id]);
-	
 	// find next task to run
 	uint8_t nextQueue__idx = 31 - __clz(bitVector);
 	TCB_t nextTask = *priorityArray[nextQueue__idx].head;
@@ -397,14 +529,11 @@ void SysTick_Handler(void) {
 	} else {
 		dequeue(&priorityArray[nextQueue__idx]);
 	}
-	
 	#endif
 	
 	#ifdef __CONTEXT
-	// context switching
 	if (msTicks % 3 == 0)
 	{
-		printf("\n	switch from task %d",SWITCH+1);
 		
 		if (SWITCH == 0)
 		{
@@ -423,13 +552,12 @@ void SysTick_Handler(void) {
 		stackPointer_next = readyTask -> stack_addr;
 		
 		SCB -> ICSR |= 1 << 28;
-		printf(" to task %d", SWITCH+1);
 	}
 	#endif
-
 }
 
-__asm void PendSV_Handler(void) {
+__asm void contextSwitch (void)
+{
 	MRS R1,MSP
 	MRS R0,PSP
 	
@@ -444,27 +572,63 @@ __asm void PendSV_Handler(void) {
 	MSR PSP,R0
 	MSR MSP,R1
 	
+	/*
+	LDR R1,=0x00000000
+	LDR R0,=__cpp(&sysTickFlag)
+	*/
+	
 	BX		LR
+}
+
+void PendSV_Handler(void) 
+{
+	// printf("\nswitch from t%d to t%d",currentTask -> task_id, readyTask -> task_id);
+	contextSwitch();
+	TASKS[currentTask -> task_id].stack_addr = stackPointer_current;
+	TASKS[currentTask -> task_id].state = READY;
+	TASKS[readyTask -> task_id].stack_addr = stackPointer_next;
+	TASKS[readyTask -> task_id].state = RUNNING;
+	currentTask = readyTask;
 }
 
 int main(void) {
 	// default code
 	printf("\n\n\n--- system init ---\n");
+	osKernelInitialize();
+	osThreadStart(t0,NULL,IDLE);
 	
 	#ifdef __CONTEXT
 	// context switching
-	osKernelInitialize();
-	osThreadStart(t0,NULL,IDLE);
 	osThreadStart(t1,NULL,NORMAL);
 	osThreadStart(t2,NULL,NORMAL);
 	osThreadStart(t3,NULL,NORMAL);
 	#endif
 	
-	
 	#ifdef __FPP
 	// FPP scheduling
-	osKernelInitialize();
-	init_priorityArray();
+	osThreadStart(t1,NULL,HIGH);
+	osThreadStart(t2,NULL,HIGH);
+	osThreadStart(t3,NULL,NORMAL);
+	osThreadStart(t4,NULL,LOW);
+	osThreadStart(t5,NULL,LOW);
+	#endif
+	
+	#ifdef __SEM
+	// blocking semaphores
+	init_sem(&sem,1);
+	osThreadStart(t1,NULL,NORMAL);
+	osThreadStart(t2,NULL,NORMAL);
+	#endif
+	
+	#ifdef __MTX
+	init_mtx(&mtx);
+	osThreadStart(t1,NULL,NORMAL);
+	osThreadStart(t2,NULL,NORMAL);
+	#endif
+	
+	#ifdef __PRIO
+	init_mtx(&mtx);
+	osThreadStart(t1,NULL,LOW);
 	#endif
 	
 	osKernelStart();
